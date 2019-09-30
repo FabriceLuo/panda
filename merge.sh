@@ -3,7 +3,7 @@
 # merge.sh
 # Copyright (C) 2019 luominghao <luominghao@live.com>
 #
-# Distributed under terms of the Sangfor license.
+# Distributed under terms of the MIT license.
 #
 
 GITLAB_TOKEN="FRQ7RnE9uRDonA5EL-iL"
