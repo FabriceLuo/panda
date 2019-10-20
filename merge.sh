@@ -6,9 +6,9 @@
 # Distributed under terms of the MIT license.
 #
 
-GITLAB_TOKEN="FRQ7RnE9uRDonA5EL-iL"
-GITLAB_BASE_URL=""
-GITLAB_AUTHOR_ID="15"
+GITLAB_TOKEN="oB-QgDLotz7vo9HxuDgp"
+GITLAB_BASE_URL="https://gitlab.com/api/v4"
+GITLAB_AUTHOR_ID="4821787"
 
 list_merges()
 {
@@ -28,10 +28,27 @@ list_merges()
 
 get_merge() {
     local merge_id=$1
+
+    
     return 0
 }
 
 create_merge() {
+    local project_id=$1
+    local src_branch=$2
+    local des_branch=$3
+    local merge_title=$4
+    local merge_desc=$5
+    local assignee_id=$6
+    local merge_info
+
+    merge_info=$(curl -X POST -H "Content-type: application/x-www-form-urlencoded, charset: utf-8" -d "private_token=${GITLAB_TOKEN}&source_branch=${src_branch}&target_branch=${des_branch}&title=${merge_title}&description=${merge_desc}&assignee_id=${assignee_id}" "${GITLAB_BASE_URL}/projects/${project_id}/merge_requests")
+    if [[ $? -ne 0 ]]; then
+        echo "create merge request failed"
+        return 1
+    fi
+
+    echo "${merge_info}"
     return 0
 }
 
@@ -60,7 +77,7 @@ get_project_id() {
         return 1
     fi
 
-    project_id=$(echo "${projects}" | foreach .[] as $item (null;if $item.ssh_url_to_repo  == "${project_url}" then null else empty end; if $item != null then $item else empty end) | .id)
+    project_id=$(echo "${projects}" | jq "foreach .[] as \$item (null;if \$item.ssh_url_to_repo  == \"${project_url}\" then null else empty end; if \$item != null then \$item else empty end) | .id")
     if [[ $? -ne 0 || -z $project_id ]]; then
         echo "get project(${project_name}) id from projects(${projects}) failed"
         return 1

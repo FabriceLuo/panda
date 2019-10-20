@@ -41,7 +41,7 @@ get_remote_branchs() {
     local branchs=
     
     is_git_repo "${repo_dir}" || return 1
-    branchs=$(git branch -r | sed 's/^\s*origin\///g')
+    branchs=$(git branch -r -v | awk '{print $1}'| sed 's/^\s*origin\///g')
     if [[ $? -ne 0 ]]; then
         echo "get repo($repo_dir) remote branchs failed"
         return 1
