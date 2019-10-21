@@ -18,6 +18,58 @@ initialize_env()
     CUR_WORK_DIR=$PWD
 }
 
+
+set_content_between()
+{
+    local content=$1
+    local begin_match=$2
+    local end_match=$3
+    local value=$4
+
+    return 0
+}
+
+get_content_between()
+{
+    local content=$1
+    local begin_match=$2
+    local end_match=$3
+
+    return 0
+}
+
+
+set_merge_defect()
+{
+    local merge_info=$1
+    local defect_id=$2
+
+    local new_merge_info=
+
+    new_merge_info=$(echo "${merge_info}" | sed '/<!-- defect begin -->/{:a;$!{N;ba};s/<!-- defect begin -->.*<!--  defect end  -->/<!-- defect begin -->\n'${defect_id}'\n<!--  defect end  -->/}')
+    if [[ $? -ne 0 ]]; then
+        echo "set merge defect id failed"
+        return 1
+    fi
+
+    echo "${new_merge_info}"
+    return 0
+}
+
+get_merge_defect() {
+    local merge_info=$1
+    local defect_id
+
+    defect_id=$(echo "${merge_info}" | sed '/<!-- defect begin -->/,/<!--  defect end  -->/!d;//d')
+    if [[ $? -ne 0 ]]; then
+        echo "get merge defect id failed"
+        return 1
+    fi
+
+    echo "${defect_id}"
+    return 0
+}
+
 get_merge_title() {
     return 0
 }
