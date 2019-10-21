@@ -26,18 +26,10 @@ get_merge_description() {
     return 0
 }
 
-create_merge_request()
+get_current_project_id()
 {
-    local local_branch
-    local remote_branch
-    local merge_info
-    local merge_title
-    local merge_desc
-    local project_id
     local repo_url
     local repo_name
-    local create_result
-    local defect_id
 
     repo_url=$(get_remote_repo_url "${CUR_WORK_DIR}")
     if [[ $? -ne 0 ]]; then
@@ -54,6 +46,26 @@ create_merge_request()
     project_id=$(get_project_id "${repo_name}" "${repo_url}")
     if [[ $? -ne 0 ]]; then
         echo "get repo(${repo_name}) project id failed"
+        return 1
+    fi
+    echo "${project_id}"
+
+    return 0
+}
+
+create_merge_request()
+{
+    local local_branch
+    local remote_branch
+    local merge_info
+    local merge_title
+    local merge_desc
+    local project_id
+    local create_result
+
+    project_id=$(get_current_project_id)
+    if [[ $? -ne 0 ]]; then
+        echo "get current repo project id failed"
         return 1
     fi
 
@@ -111,16 +123,108 @@ create_merge_request()
 
 update_merge_request()
 {
+    local project_id
+    local merge_info
+    local new_merge_info=
+    local merge_title
+    local merge_desc
+
+    project_id=$(get_current_project_id)
+    if [[ $? -ne 0 ]]; then
+        echo "get current repo project id failed"
+        return 1
+    fi
+
+    merge_id=$(get_merge_to_update "${project_id}")
+    if [[ $? -ne 0 ]]; then
+        echo "get project(${project_id}) merge request to update failed"
+        return 1
+    fi
+
+    merge_info=$(get_merge "${merge_id}")
+    if [[ $? -ne 0 ]]; then
+        echo "get project(${project_id}) merge(${merge_id}) info failed"
+        return 1
+    fi
+
+    new_merge_info=$(get_new_merge_info "${merge_info}")
+    if [[ $? -ne 0 ]]; then
+        echo "get merge information failed"
+        return 1
+    fi
+
+    merge_title=$(get_merge_title "${merge_info}")
+    if [[ $? -ne 0 ]]; then
+        echo "get merge title failed"
+        return 1
+    fi
+
+    merge_desc=$(get_merge_description "${merge_info}")
+    if [[ $? -ne 0 ]]; then
+        echo "get merge desc failed"
+        return 1
+    fi
+
+    update_result=$(create_merge "${project_id}" "${merge_id}" "${remote_branch}" "${merge_title}" "${merge_desc}" "${assignee_id}")
+    if [[ $? -ne 0 ]]; then
+        echo "update merge request failed"
+        return 1
+    fi
+
     return 0
 }
 
 close_merge_request()
 {
+    local project_id
+    local merge_id
+    local close_result
+
+    project_id=$(get_current_project_id)
+    if [[ $? -ne 0 ]]; then
+        echo "get current repo project id failed"
+        return 1
+    fi
+
+    merge_id=$(get_merge_to_close "${project_id}")
+    if [[ $? -ne 0 ]]; then
+        echo "get project(${project_id}) merge request to close failed"
+        return 1
+    fi
+
+    close_result=$(close_merge "${project_id}" "${merge_id}")
+    if [[ $? -ne 0 ]]; then
+        echo "close merge request failed"
+        return 1
+    fi
+
     return 0
 }
 
 reopen_merge_request()
 {
+    local project_id
+    local merge_id
+    local close_result
+
+    project_id=$(get_current_project_id)
+    if [[ $? -ne 0 ]]; then
+        echo "get current repo project id failed"
+        return 1
+    fi
+
+    merge_id=$(get_merge_to_reopen "${project_id}")
+    if [[ $? -ne 0 ]]; then
+        echo "get project(${project_id}) merge request to reopen failed"
+        return 1
+    fi
+
+    close_result=$(reopen_merge "${project_id}" "${merge_id}")
+    if [[ $? -ne 0 ]]; then
+        echo "reopen merge request failed"
+        return 1
+    fi
+
     return 0
 }
 
@@ -277,18 +381,80 @@ get_new_merge_info()
     return 0
 }
 
+get_project_one_merge()
+{
+    local project_id=$1
+    local merge_status=$2
+    local merge_id=
+
+    project_merges=$(list_merges "${project_id}" "${merge_status}")
+    if [[ $? -ne 0 ]]; then
+        echo "get project(${project_id}) merge(${merge_status}) list failed"
+        return 1
+    fi
+
+    merge_id=$(get_merge_from_merges "${project_merges}")
+    if [[ $? -ne 0 ]]; then
+        echo "get merge from list failed"
+        return 1
+    fi
+
+    echo "${merge_id}"
+    return 0
+}
+
+get_merge_from_merges()
+{
+    local project_merges=$1
+
+    return 0
+}
+
 get_merge_to_update()
 {
+    local project_id=$1
+    local merge_status="opened"
+    local merge_id=
+
+    merge_id=$(get_project_one_merge "${project_id}" "${merge_status}")
+    if [[ $? -ne 0 ]]; then
+        echo "get merge from list failed"
+        return 1
+    fi
+
+    echo "${merge_id}"
     return 0
 }
 
 get_merge_to_close()
 {
+    local project_id=$1
+    local merge_status="opened"
+    local merge_id=
+
+    merge_id=$(get_project_one_merge "${project_id}" "${merge_status}")
+    if [[ $? -ne 0 ]]; then
+        echo "get merge from list failed"
+        return 1
+    fi
+
+    echo "${merge_id}"
     return 0
 }
 
 get_merge_to_reopen()
 {
+    local project_id=$1
+    local merge_status="closed"
+    local merge_id=
+
+    merge_id=$(get_project_one_merge "${project_id}" "${merge_status}")
+    if [[ $? -ne 0 ]]; then
+        echo "get merge from list failed"
+        return 1
+    fi
+
+    echo "${merge_id}"
     return 0
 }
 
@@ -357,6 +523,9 @@ main()
             ;;
         reopen_merge)
             reopen_merge_request
+            ;;
+        close_merge)
+            close_merge_request
             ;;
         get_defect_to_fix)
             get_defect_to_fix

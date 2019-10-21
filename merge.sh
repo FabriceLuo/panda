@@ -53,10 +53,21 @@ create_merge() {
 }
 
 update_merge() {
+    local project_id=$1
+    local merge_id=$2
+    local des_branch=$3
+    local merge_title=$4
+    local merge_desc=$5
+    local assignee_id=$6
+    local merge_info
+
     return 0
 }
 
 close_merge() {
+    local project_id=$1
+    local merge_id=$2
+
     return 0
 }
 
