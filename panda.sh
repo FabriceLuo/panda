@@ -1,13 +1,17 @@
 #!/bin/bash
 
-. /home/mike/code/panda/merge.sh
-. /home/mike/code/panda/repo.sh
-. /home/mike/code/panda/branch.sh
+. ./merge.sh
+. ./repo.sh
+. ./branch.sh
+. ./defect.sh
 
 CUR_WORK_DIR=
 PANDA_TMP_DIR="/tmp/panda"
 MERGE_FILE_SUFFIX=".md"
 MERGE_TEMPLATE_FILE=""
+
+# defect status: new, open, reopen, 重现中
+DEFECT_STATUSES_NEED_HANDLE="10001,10002,10006,10005"
 
 initialize_env()
 {
@@ -80,6 +84,13 @@ create_merge_request()
     show_merge_diff  "${local_branch}" "${remote_branch}"
     if [[ $? -ne 0 ]]; then
         echo "show diff between local branch and remote branch failed"
+        return 1
+    fi
+
+    # 选择对应的缺陷ID
+    defect_id=$(get_defect_to_fix)
+    if [[ $? -ne 0 ]]; then
+        echo "get defect to fix failed"
         return 1
     fi
 
@@ -447,6 +458,53 @@ get_merge_to_reopen()
     return 0
 }
 
+get_defect_from_defects() {
+    local defects=$1
+    local defect
+    local defect_id=
+
+    defect=$(echo "${defects}" | jq --raw-output 'map(.id + " " +  .fields.summary) | .[]' | fzf --print-query)
+    local errcode=$?
+    if [[ $errcode -eq 130 ]]; then
+        echo "defect select was canlled"
+        return 1
+    fi
+
+    if [[ $errcode -ne 0 ]]; then
+        echo "get defect select failed"
+        return 1
+    fi
+
+    defect_id=$(echo "${defect}" | sed -n '2p' | awk '{print $1}')
+    if [[ $? -ne 0 ]]; then
+        echo "get defect id failed"
+        return 1
+    fi
+
+    echo "${defect_id}"
+    return 0
+}
+
+get_defect_to_fix() {
+    local defects
+    local defect_id
+
+    defects=$(get_defects_by_me "${DEFECT_STATUSES_NEED_HANDLE}")
+    if [[ $? -ne 0 ]]; then
+        echo "get defect list to fix failed"
+        return 1
+    fi
+
+    defect_id=$(get_defect_from_defects "${defects}")
+    if [[ $? -ne 0 ]]; then
+        echo "get defect id to fix failed"
+        return 1
+    fi
+
+    echo "${defect_id}"
+    return 0
+}
+
 main()
 {
     initialize_env
@@ -469,6 +527,9 @@ main()
         close_merge)
             close_merge_request
             ;;
+        get_defect_to_fix)
+            get_defect_to_fix
+            ;;
         help|*)
             print_help
             ;;
@@ -476,5 +537,3 @@ main()
 }
 
 main "$@"
-
-
