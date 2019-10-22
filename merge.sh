@@ -16,7 +16,7 @@ list_merges()
     local merge_status=$2
     local merges=
 
-    merges=$(curl -s "${GITLAB_BASE_URL}/projects/${project_id}/merge_requests?private_token=${GITLAB_TOKEN}&author_id=${GITLAB_AUTHOR_ID}&order_by=updated_at&state=${merge_status}" | jq -r '.[].id |=tostring | .[] | .id + ":" + .title')
+    merges=$(curl -s "${GITLAB_BASE_URL}/projects/${project_id}/merge_requests?private_token=${GITLAB_TOKEN}&author_id=${GITLAB_AUTHOR_ID}&order_by=updated_at&state=${merge_status}" | jq -r '.[].iid |=tostring | .[] | .iid + " " + .title')
     if [[ $? -ne 0 ]]; then
         echo "get project(${project_id}) merge list(${merge_status}) failed"
         return 1
@@ -26,10 +26,19 @@ list_merges()
     return 0
 }
 
-get_merge() {
-    local merge_id=$1
+get_merge()
+{
+    local project_id=$1
+    local merge_id=$2
+    local merge
 
-    
+    merge=$(curl -s "${GITLAB_BASE_URL}/projects/${project_id}/merge_requests/${merge_id}?private_token=${GITLAB_TOKEN}")
+    if [[ $? -ne 0 ]]; then
+        echo "get project(${project_id}) merge(${merge_id}) failed"
+        return 1
+    fi
+
+    echo "${merge}"
     return 0
 }
 
@@ -42,7 +51,7 @@ create_merge() {
     local assignee_id=$6
     local merge_info
 
-    merge_info=$(curl -X POST -H "Content-type: application/x-www-form-urlencoded, charset: utf-8" -d "private_token=${GITLAB_TOKEN}&source_branch=${src_branch}&target_branch=${des_branch}&title=${merge_title}&description=${merge_desc}&assignee_id=${assignee_id}" "${GITLAB_BASE_URL}/projects/${project_id}/merge_requests")
+    merge_info=$(curl -s -X POST -H "Content-type: application/x-www-form-urlencoded, charset: utf-8" -d "private_token=${GITLAB_TOKEN}&source_branch=${src_branch}&target_branch=${des_branch}&title=${merge_title}&description=${merge_desc}&assignee_id=${assignee_id}" "${GITLAB_BASE_URL}/projects/${project_id}/merge_requests")
     if [[ $? -ne 0 ]]; then
         echo "create merge request failed"
         return 1
