@@ -1,9 +1,9 @@
 #!/bin/bash
 
-. ./merge.sh
-. ./repo.sh
-. ./branch.sh
-. ./defect.sh
+. merge.sh
+. repo.sh
+. branch.sh
+. defect.sh
 
 CUR_WORK_DIR=
 PANDA_TMP_DIR="/tmp/panda"
@@ -25,7 +25,15 @@ set_content_between()
     local begin_match=$2
     local end_match=$3
     local value=$4
+    local new_content=
 
+    new_content=$(echo "${content}" | sed "/${begin_match}/{:a;\$!{N;ba};s/${begin_match}.*${end_match}/${begin_match}\n${value}\n${end_match}/}")
+    if [[ $? -ne 0 ]]; then
+        echo "set content to value(${value}) failed"
+        return 1
+    fi 
+
+    echo "${new_content}"
     return 0
 }
 
@@ -34,19 +42,27 @@ get_content_between()
     local content=$1
     local begin_match=$2
     local end_match=$3
+    local value=
 
+    value=$(echo -e "${content}" | sed "/${begin_match}/,/${end_match}/! d;//d")
+    if [[ $? -ne 0 ]]; then
+        echo "get content value failed"
+        return 1
+    fi
+
+    echo "${value}"
     return 0
 }
-
 
 set_merge_defect()
 {
     local merge_info=$1
     local defect_id=$2
-
+    local begin_match='<!-- defect begin -->'
+    local end_match='<!--  defect end  -->'
     local new_merge_info=
 
-    new_merge_info=$(echo "${merge_info}" | sed '/<!-- defect begin -->/{:a;$!{N;ba};s/<!-- defect begin -->.*<!--  defect end  -->/<!-- defect begin -->\n'${defect_id}'\n<!--  defect end  -->/}')
+    new_merge_info=$(set_content_between "${merge_info}" "${begin_match}" "${end_match}" "${defect_id}")
     if [[ $? -ne 0 ]]; then
         echo "set merge defect id failed"
         return 1
@@ -58,9 +74,11 @@ set_merge_defect()
 
 get_merge_defect() {
     local merge_info=$1
+    local begin_match='<!-- defect begin -->'
+    local end_match='<!--  defect end  -->'
     local defect_id
 
-    defect_id=$(echo "${merge_info}" | sed '/<!-- defect begin -->/,/<!--  defect end  -->/!d;//d')
+    defect_id=$(get_content_between "${merge_info}" "${begin_match}" "${end_match}")
     if [[ $? -ne 0 ]]; then
         echo "get merge defect id failed"
         return 1
@@ -71,11 +89,40 @@ get_merge_defect() {
 }
 
 get_merge_title() {
+    local merge_info=$1
+    local begin_match='<!-- title begin -->'
+    local end_match='<!--  title end  -->'
+    local merge_title
+
+    merge_title=$(get_content_between "${merge_info}" "${begin_match}" "${end_match}")
+    if [[ $? -ne 0 ]]; then
+        echo "get merge title failed"
+        return 1
+    fi
+
+    echo "${merge_title}"
+    return 0
+
     return 0
 }
 
-get_merge_description() {
-    return 0
+get_merge_description()
+{
+    local merge_info=$1
+    local begin_match='<!-- description begin -->'
+    local end_match='<!--  description end  -->'
+    local merge_desc
+
+    merge_desc=$(get_content_between "${merge_info}" "${begin_match}" "${end_match}")
+    if [[ $? -ne 0 ]]; then
+        echo "get merge desc failed"
+        return 1
+    fi
+
+    #echo "${merge_desc}"
+    python -c "import urllib; print urllib.quote('''${merge_desc}''')"
+    #return 0
+    return $?
 }
 
 get_current_project_id()
@@ -102,6 +149,18 @@ get_current_project_id()
     fi
     echo "${project_id}"
 
+    return 0
+}
+
+get_merge_template()
+{
+    cat "${MERGE_TEMPLATE_FILE}"
+
+    return $?
+}
+
+get_assignee_id()
+{
     return 0
 }
 
