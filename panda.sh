@@ -9,6 +9,7 @@ CUR_WORK_DIR=
 PANDA_TMP_DIR="/tmp/panda"
 MERGE_FILE_SUFFIX=".md"
 MERGE_TEMPLATE_FILE=""
+MERGE_REVIEW_PERSONS_CACHE_FILE=
 
 # defect status: new, open, reopen, 重现中
 DEFECT_STATUSES_NEED_HANDLE="10001,10002,10006,10005"
@@ -54,6 +55,7 @@ get_content_between()
     return 0
 }
 
+
 set_merge_defect()
 {
     local merge_info=$1
@@ -85,6 +87,34 @@ get_merge_defect() {
     fi
 
     echo "${defect_id}"
+    return 0
+}
+
+set_merge_reviewers()
+{
+    local merge_info=$1
+    local reviewer_ids=$2
+    local begin_match='<!-- reviewers begin -->'
+    local end_match='<!--  reviewers end  -->'
+    local new_merge_info=
+
+    if [[ -z $reviewer_ids ]]; then
+        return 0
+    fi
+
+    reviewer_ids=$(echo "${reviewer_ids}" | sed 's/^/@/g')
+    if [[ $? -ne 0 ]]; then
+        echo "convert reviewer ids failed"
+        return 1
+    fi
+
+    new_merge_info=$(set_content_between "${merge_info}" "${begin_match}" "${end_match}" "${reviewer_ids}")
+    if [[ $? -ne 0 ]]; then
+        echo "set merge reviewers id failed"
+        return 1
+    fi
+
+    echo "${new_merge_info}"
     return 0
 }
 
@@ -159,20 +189,132 @@ get_merge_template()
     return $?
 }
 
+update_review_persons_cache() {
+    local cache_dir=
+
+    cache_dir=$(dirname "${MERGE_REVIEW_PERSONS_CACHE_FILE}")
+    if [[ ! -d "${cache_dir}" ]]; then
+        mkdir -p "${cache_dir}"
+        if [[ $? -ne 0 ]]; then
+            echo "create review persons cache dir failed"
+            return 1
+        fi
+    fi
+
+    review_persons=$(list_review_persons)
+    if [[ $? -ne 0 ]]; then
+        echo "get review person list failed"
+        return 1
+    fi
+
+    persons=$(echo "${review_persons}" | jq --raw-output 'map(.name + "@" + .username) | .[]' | sed 's/[0-9a-zA-Z]*@/@/g' | grep -v -E 'VT|All')
+    if [[ $? -ne 0 ]]; then
+        echo "get review person info failed"
+        return 1
+    fi
+
+    echo "${persons}" > "${MERGE_REVIEW_PERSONS_CACHE_FILE}"
+    return $?
+}
+
+get_review_persons_from_cache() {
+    if [[ ! -f "${MERGE_REVIEW_PERSONS_CACHE_FILE}" ]]; then
+        update_review_persons_cache
+        if [[ $? -ne 0 ]]; then
+            echo "update review persons cache failed"
+            return 1
+        fi
+    fi
+
+    cat "${MERGE_REVIEW_PERSONS_CACHE_FILE}"
+    return $?
+}
+
+get_one_review_person()
+{
+    local prompt=$1
+    local person_name=
+    local persons=
+    local person=
+    local errcode
+
+    # 排除VT及All组
+    persons=$(get_review_persons_from_cache | grep -v -E 'VT|All')
+    if [[ $? -ne 0 ]]; then
+        echo "get review person from cache failed"
+        return 1
+    fi
+    
+    person=$(get_fzf_selection "${persons}" "${prompt}")
+    errcode=$?
+    if [[ $errcode -ne 0 ]]; then
+        echo "get one review person failed"
+        return $errcode
+    fi
+
+    person_name=$(echo "${person}" | cut -f 2 -d '@')
+    if [[ $? -ne 0 ]]; then
+        echo "get review person name failed"
+        return 1
+    fi
+    echo "${person_name}"
+    return 0
+}
+
 get_assignee_id()
 {
+    local assignee_id=
+
+    assignee_id=$(get_one_review_person "选择合并人")
+    if [[ $? -ne 0 ]]; then
+        echo "get assignee person failed"
+        return 1
+    fi
+
+    echo "${assignee_id}"
+    return 0
+}
+
+get_reviewer_ids() {
+    local reviewer_ids=
+    local reviewer_id=
+    local errcode=
+
+    while :
+    do
+        reviewer_id=$(get_one_review_person "选择审核人")
+        errcode=$?
+
+        if [[ $errcode -eq 130 ]]; then
+            break
+        elif [[ $errcode -eq 0 ]]; then
+            if [[ -z $reviewer_ids ]]; then
+                reviewer_ids=$reviewer_id
+            else
+                reviewer_ids="${reviewer_ids}\n${reviewer_id}"
+            fi
+        else
+            echo "get one review person failed"
+            return 1
+        fi
+    done
+
+    echo -e "${reviewer_ids}"
     return 0
 }
 
 create_merge_request()
 {
-    local local_branch
-    local remote_branch
+    local src_branch
+    local des_branch
     local merge_info
     local merge_title
     local merge_desc
     local project_id
     local create_result
+    local create_failed
+    local assignee_id
+    local reviewer_ids
 
     project_id=$(get_current_project_id)
     if [[ $? -ne 0 ]]; then
@@ -180,21 +322,31 @@ create_merge_request()
         return 1
     fi
 
-    local_branch=$(get_local_branch)
+    src_branch=$(get_src_branch)
     if [[ $? -ne 0 ]]; then
         echo "get local branch failed"
         return 1
     fi
 
-    remote_branch=$(get_remote_branch)
+    des_branch=$(get_des_branch)
     if [[ $? -ne 0 ]]; then
         echo "get remote branch failed"
         return 1
     fi
+    if [[ $src_branch == $des_branch ]]; then
+        echo "merge src branch and des branch can not be same, branch:${src_branch}"
+        return 1
+    fi
 
-    show_merge_diff  "${local_branch}" "${remote_branch}"
+    show_merge_diff  "${src_branch}" "${des_branch}"
     if [[ $? -ne 0 ]]; then
         echo "show diff between local branch and remote branch failed"
+        return 1
+    fi
+
+    merge_info=$(get_merge_template)
+    if [[ $? -ne 0 ]]; then
+        echo "get merge template failed"
         return 1
     fi
 
@@ -204,8 +356,47 @@ create_merge_request()
         echo "get defect to fix failed"
         return 1
     fi
+    merge_info=$(set_merge_defect "${merge_info}" "${defect_id}")
+    if [[ $? -ne 0 ]]; then
+        echo "update merge defect failed"
+        return 1
+    fi
 
-    merge_info=$(get_new_merge_info)
+    reviewer_ids=$(get_reviewer_ids)
+    if [[ $? -ne 0 ]]; then
+        echo "get reviewer ids failed"
+        return 1
+    fi
+    merge_info=$(set_merge_reviewers "${merge_info}" "${reviewer_ids}")
+    if [[ $? -ne 0 ]]; then
+        echo "update merge reviews failed"
+        return 1
+    fi
+
+    assignee_id=$(get_assignee_id)
+    if [[ $? -ne 0 ]]; then
+        echo "get assignee person failed"
+        return 0
+    fi
+
+    merge_info_file=$(generate_merge_info_file_path)
+    if [[ $? -ne 0 ]]; then
+        echo "generate merge info file failed"
+        return 1
+    fi
+    update_merge_template_file "${merge_info_file}" "${merge_info}"
+    if [[ $? -ne 0 ]]; then
+        echo "update merge info(${merge_info}) to file(${merge_info_file}) failed"
+        return 1
+    fi
+    edit_file "${merge_info_file}"
+    if [[ $? -ne 0 ]]; then
+        echo "edit file(${merge_info_file}) failed"
+        return 1
+    fi
+
+    merge_info=$(cat "${merge_info_file}")
+
     if [[ $? -ne 0 ]]; then
         echo "get merge information failed"
         return 1
@@ -223,12 +414,22 @@ create_merge_request()
         return 1
     fi
 
-    create_result=$(create_merge "${project_id}" "${local_branch}" "${remote_branch}" "${merge_title}" "${merge_desc}" "${assignee_id}")
+    create_result=$(create_merge "${project_id}" "${src_branch}" "${des_branch}" "${merge_title}" "${merge_desc}" "${assignee_id}")
     if [[ $? -ne 0 ]]; then
         echo "create merge request failed"
         return 1
     fi
 
+    create_failed=$(echo "${create_result}" | jq 'has("error") or has("message")')
+    if [[ $? -ne 0 ]]; then
+        echo "get merge create result info failed"
+        return 1
+    fi
+
+    if [[ $create_failed == "true" ]]; then
+        echo "create merge request failed, error:${create_result}"
+        return 1
+    fi
     return 0
 }
 
@@ -339,28 +540,59 @@ reopen_merge_request()
     return 0
 }
 
-get_local_branch()
+get_fzf_selection() {
+    local selections=$1
+    local prompt=$2
+    local print_query=$3
+    local selection=
+
+    if [[ -n $print_query ]]; then
+        print_query="--print_query"
+    fi
+
+    selection=$(echo "${selections}" | fzf $print_query --prompt "${prompt} ->:")
+    local errcode=$?
+    if [[ $errcode -eq 130 ]]; then
+        echo "select was canlled"
+        return $errcode
+    fi
+
+    if [[ $errcode -ne 0 ]]; then
+        echo "get select failed"
+        return $errcode
+    fi
+
+    echo "${selection}"
+    return 0
+}
+
+get_branch_from_branchs() {
+    local branchs=$1
+    local prompt=$2 
+
+    local branch
+
+    branch=$(get_fzf_selection "${branchs}" "${prompt}")
+    if [[ $? -ne 0 ]]; then
+        echo "select branch failed"
+        return 1
+    fi
+    echo "${branch}"
+    return 0
+}
+
+get_src_branch()
 {
     local branch_name
-    local dialog_content=""
-    declare -a branch_list
+    local src_branchs
 
-    local local_branchs=$(get_local_branchs "${CUR_WORK_DIR}")
+    src_branchs=$(get_remote_branchs "${CUR_WORK_DIR}")
     if [[ $? -ne 0 ]]; then
         echo "get local branchs failed"
         return 1
     fi
 
-    local i=0
-    for branch in $local_branchs
-    do
-        i=$((i+1))
-
-        branch_list[$i]="${branch}"
-        dialog_content="${dialog_content} ${i} ${branch} off"
-    done
-
-    branch_name=$(dialog --stdout --radiolist "选择本地分支" 300 300 $i $dialog_content)
+    branch_name=$(get_branch_from_branchs "${src_branchs}" "选择源分支")
     if [[ $? -ne 0 ]]; then
         echo "get local branch failed"
         return 1
@@ -370,28 +602,18 @@ get_local_branch()
     return 0
 }
 
-get_remote_branch()
+get_des_branch()
 {
     local branch_name
-    local dialog_content=""
-    declare -a branch_list
+    local remote_branchs
 
-    local remote_branchs=$(get_remote_branchs "${CUR_WORK_DIR}")
+    remote_branchs=$(get_remote_branchs "${CUR_WORK_DIR}")
     if [[ $? -ne 0 ]]; then
         echo "get remote branchs failed"
         return 1
     fi
 
-    local i=0
-    for branch in $remote_branchs
-    do
-        i=$((i+1))
-
-        branch_list[$i]="${branch}"
-        dialog_content="${dialog_content} ${i} ${branch} off"
-    done
-
-    branch_name=$(dialog --stdout --radiolist "选择远程合并分支" 300 300 $i $dialog_content)
+    branch_name=$(get_branch_from_branchs "${remote_branchs}" "选择目的分支")
     if [[ $? -ne 0 ]]; then
         echo "get remote branch failed"
         return 1
@@ -427,40 +649,44 @@ edit_file() {
         return 1
     fi
 
-    cat "${file_path}"
-    if [[ $? -ne 0 ]]; then
-        echo "get file(${file_path}) content failed"
-        return 1
-    fi
-
     return 0
 }
 
-update_merge_template_file() {
+update_merge_template_file()
+{
     local file_path=$1
     local merge_content=$2
+    local file_dir
 
-    [[ -e "${file_path}" ]] || cp "${MERGE_TEMPLATE_FILE}" "${file_path}"
+    file_dir=$(dirname "${file_path}")
     if [[ $? -ne 0 ]]; then
-        echo "copy merge template file(${MERGE_TEMPLATE_FILE}) to(${file_path}) failed"
+        echo "get file(${file_path}) dir failed"
+        return 1
+    fi
+
+    [[ -e "${file_dir}" ]] || mkdir -p "${file_dir}"
+    if [[ $? -ne 0 ]]; then
+        echo "mkdir dir(${file_dir}) failed"
         return 1
     fi
 
     # 合并信息为空时，不需要更新
     if [[ -z $merge_content ]]; then
-        return 0
+        cp -f "${MERGE_TEMPLATE_FILE}" "${file_path}"
+    else
+        echo "${merge_content}" > "${file_path}"
     fi
 
-    # 更新各种信息
+    if [[ $? -ne 0 ]]; then
+        echo "generate merge info file failed"
+        return 1
+    fi
 
     return 0
 }
 
-get_new_merge_info()
+generate_merge_info_file_path()
 {
-    local merge_content=$1
-    local new_merge_content=
-
     local merge_id
     local merge_info_file
 
@@ -476,19 +702,7 @@ get_new_merge_info()
         return 1
     fi
 
-    update_merge_template_file "${merge_info_file}" "${merge_content}"
-    if [[ $? -ne 0 ]]; then
-        echo "update merge info(${merge_content}) to file(${merge_info_file}) failed"
-        return 1
-    fi
-
-    new_merge_content=$(edit_file "${merge_info_file}")
-    if [[ $? -ne 0 ]]; then
-        echo "edit file(${merge_info_file}) failed"
-        return 1
-    fi
-
-    echo "${new_merge_content}"
+    echo "${merge_info_file}"
     return 0
 }
 
@@ -514,10 +728,33 @@ get_project_one_merge()
     return 0
 }
 
+get_merge_info()
+{
+    local project_id=$1
+    local merge_id=$2
+
+    return 0
+}
+
 get_merge_from_merges()
 {
     local project_merges=$1
+    local merge
+    local merge_id
 
+    merge=$(get_fzf_selection "${project_merges}")
+    if [[ $? -ne 0 ]]; then
+        echo "get merge selection failed"
+        return 1
+    fi
+
+    merge_id=$(echo "${merge}" | awk '{print $1}')
+    if [[ $? -ne 0 ]]; then
+        echo "get merge id failed"
+        return 1
+    fi
+
+    echo "${merge_id}"
     return 0
 }
 
@@ -569,12 +806,28 @@ get_merge_to_reopen()
     return 0
 }
 
+get_merge_to_fix()
+{
+    local project_id=$1
+    local merge_status="all"
+    local merge_id=
+
+    merge_id=$(get_project_one_merge "${project_id}" "${merge_status}")
+    if [[ $? -ne 0 ]]; then
+        echo "get merge from list failed"
+        return 1
+    fi
+
+    echo "${merge_id}"
+    return 0
+}
+
 get_defect_from_defects() {
     local defects=$1
     local defect
     local defect_id=
 
-    defect=$(echo "${defects}" | jq --raw-output 'map(.id + " " +  .fields.summary) | .[]' | fzf --print-query)
+    defect=$(echo "${defects}" | jq --raw-output 'map(.key + " " +  .fields.summary) | .[]' | fzf --print-query)
     local errcode=$?
     if [[ $errcode -eq 130 ]]; then
         echo "defect select was canlled"
@@ -616,6 +869,65 @@ get_defect_to_fix() {
     return 0
 }
 
+generate_defect_fix_info()
+{
+    return 0
+}
+
+fix_defect_request()
+{
+    local project_id
+    local defect_id
+    local merge
+    local merge_id
+    local merge_desc
+
+    project_id=$(get_current_project_id)
+    if [[ $? -ne 0 ]]; then
+        echo "get current repo project id failed"
+        return 1
+    fi
+
+    merge_id=$(get_merge_to_fix "${project_id}")
+    if [[ $? -ne 0 ]]; then
+        echo "get merge to fix failed"
+        return 1
+    fi
+
+    if [[ -n $merge_id ]]; then
+        merge=$(get_merge "${project_id}" "${merge_id}")
+        if [[ $? -ne 0 ]]; then
+            echo "get merge(${merge_id}) info failed"
+            return 1
+        fi
+    fi
+
+    # merge不为空时，从merge中获取defect id
+    if [[ -n $merge ]]; then
+        merge_desc=$(echo "${merge}" | jq '.description')
+        if [[ $? -ne 0 ]]; then
+            echo "get merge desc failed"
+            return 1
+        fi
+
+        defect_id=$(get_merge_defect "${merge_desc}")
+        if [[ $? -ne 0 ]]; then
+            echo "get defect id from merge failed"
+            return 1
+        fi
+    fi
+
+    if [[ -z $defect_id ]]; then
+        defect_id=$(get_defect_to_fix)
+        if [[ $? -ne 0 ]]; then
+            echo "get defect to fix failed"
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
 main()
 {
     initialize_env
@@ -638,8 +950,8 @@ main()
         close_merge)
             close_merge_request
             ;;
-        get_defect_to_fix)
-            get_defect_to_fix
+        fix_defect)
+            fix_defect_request
             ;;
         help|*)
             print_help
