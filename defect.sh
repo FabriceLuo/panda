@@ -1,8 +1,7 @@
 #! /bin/bash
 
 DEFECT_BASE_URL="http://td.sangfor.com/api/v1"
-#MY_DEFECT_USER_ID="10500"
-MY_DEFECT_USER_ID="11109"
+MY_DEFECT_USER_ID="10500"
 DEFECT_PRODUCT_ID="10038"
 DEFECT_TOKEN_ID="e3758f4c-f3a8-11e9-9a1f-0242ac120007"
 
@@ -11,7 +10,7 @@ DEFECT_REQ_HEADER="-H Content-Type:application/json;charset=UTF-8 -H token:${DEF
 get_defects_search_req_template() {
     local req_data=
 
-    req_data=$(echo "{}" | jq '.query_conditions|={} | .query_conditions.or|={} | .query_conditions.fields|={}')
+    req_data=$(echo "{}" | jq '.query_conditions|={} | .query_conditions.or|={} | .query_conditions.or.fields|={} | .query_conditions.and|={} | .query_conditions.and.fields|={}')
     if [[ $? -ne 0 ]]; then
         echo "construct defect requst template failed"
         return 1
