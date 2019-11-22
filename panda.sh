@@ -12,7 +12,7 @@ MERGE_TEMPLATE_FILE=""
 MERGE_REVIEW_PERSONS_CACHE_FILE=
 
 # defect status: new, open, reopen, 重现中
-DEFECT_STATUSES_NEED_HANDLE="10001,10002,10006,10005"
+DEFECT_STATUSES_NEED_HANDLE="new or open or repen or 重现中"
 
 initialize_env()
 {
@@ -102,7 +102,7 @@ set_merge_reviewers()
         return 0
     fi
 
-    reviewer_ids=$(echo "${reviewer_ids}" | sed 's/^/@/g')
+    reviewer_ids=$(echo "${reviewer_ids}" | sed 's/^/@/g' | tr '\n' ' ')
     if [[ $? -ne 0 ]]; then
         echo "convert reviewer ids failed"
         return 1
@@ -207,7 +207,7 @@ update_review_persons_cache() {
         return 1
     fi
 
-    persons=$(echo "${review_persons}" | jq --raw-output 'map(.name + "@" + .username) | .[]' | sed 's/[0-9a-zA-Z]*@/@/g' | grep -v -E 'VT|All')
+    persons=$(echo "${review_persons}" | jq '.[].id |= tostring' | jq --raw-output 'map(.name+ "@" + .username + "#" + .id) | .[]' | sed 's/[0-9a-zA-Z]*@/@/g')
     if [[ $? -ne 0 ]]; then
         echo "get review person info failed"
         return 1
@@ -252,22 +252,24 @@ get_one_review_person()
         return $errcode
     fi
 
-    person_name=$(echo "${person}" | cut -f 2 -d '@')
-    if [[ $? -ne 0 ]]; then
-        echo "get review person name failed"
-        return 1
-    fi
-    echo "${person_name}"
+    echo "${person}"
     return 0
 }
 
 get_assignee_id()
 {
+    local person=
     local assignee_id=
 
-    assignee_id=$(get_one_review_person "选择合并人")
+    person=$(get_one_review_person "选择合并人")
     if [[ $? -ne 0 ]]; then
         echo "get assignee person failed"
+        return 1
+    fi
+
+    assignee_id=$(echo "${person}" | cut -f 2 -d '#')
+    if [[ $? -ne 0 ]]; then
+        echo "get assignee person id failed"
         return 1
     fi
 
@@ -278,16 +280,23 @@ get_assignee_id()
 get_reviewer_ids() {
     local reviewer_ids=
     local reviewer_id=
+    local person
     local errcode=
 
     while :
     do
-        reviewer_id=$(get_one_review_person "选择审核人")
+        person=$(get_one_review_person "选择审核人")
         errcode=$?
 
         if [[ $errcode -eq 130 ]]; then
             break
         elif [[ $errcode -eq 0 ]]; then
+            reviewer_id=$(echo "${person}" | cut -f 2 -d '@' | cut -f 1 -d '#')
+            if [[ $? -ne 0 ]]; then
+                echo "get reviewer_id person id failed"
+                return 1
+            fi
+
             if [[ -z $reviewer_ids ]]; then
                 reviewer_ids=$reviewer_id
             else
