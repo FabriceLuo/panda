@@ -48,7 +48,7 @@ get_defects() {
         echo "set defect request user ids failed"
         return 1
     fi
-    req_data=$(echo "${req_data}" | jq ".query_conditions.or.fields.status_tag|=[${defect_statuses}]")
+    req_data=$(echo "${req_data}" | jq ".query_conditions.or.fields.status_tag|=\"${defect_statuses}\"")
     if [[ $? -ne 0 ]]; then
         echo "set defect request user ids failed"
         return 1
