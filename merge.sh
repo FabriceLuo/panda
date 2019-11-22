@@ -106,3 +106,60 @@ get_project_id() {
     echo "${project_id}"
     return 0
 }
+
+get_review_persons_count()
+{
+    curl -s -I -H "Private-Token:${GITLAB_TOKEN}" "${GITLAB_BASE_URL}/api/v4/users" | grep "X-Total:" | awk '{print $2}' | sed 's/\s*//g'
+}
+
+list_review_persons()
+{
+    # 用户列表被分页，多次获取
+    local per_page=100
+    local page_total=0
+    local page_index=1
+    local persons_total=0
+    local persons_all=
+    local persons_page=
+
+    persons_total=$(get_review_persons_count)
+    if [[ $? -ne 0 ]]; then
+        echo "get review persons total count failed"
+        return 1
+    fi
+
+    total_pages=$(echo "($persons_total + $per_page - 1) / $per_page" | bc)
+    if [[ $? -ne 0 ]]; then
+        echo "compute user total pages failed"
+        return 1
+    fi
+
+    while [[ $page_index -le $total_pages ]]; do
+        # 获取页的用户
+        persons_page=$(curl -s -H "Private-Token:${GITLAB_TOKEN}" "${GITLAB_BASE_URL}/api/v4/users?page=${page_index}&per_page=${per_page}")
+        if [[ $? -ne 0 ]]; then
+            echo "get page(${page_index}) users failed"
+            return 1
+        fi
+
+        if [[ -n $persons_all ]]; then
+            # 合入到总的列表中，将persons_all的]换成逗号，将persons_page的[去掉，然后进行字符串合并即可
+            persons_all=$(echo "${persons_all}" | sed 's/\]/,/g')
+            if [[ $? -ne 0 ]]; then
+                echo "update persons_all failed"
+                return 1
+            fi
+            persons_page=$(echo "${persons_page}" | sed 's/\[//')
+            if [[ $? -ne 0 ]]; then
+                echo "update persons_page failed"
+                return 1
+            fi
+        fi
+
+        persons_all="${persons_all}${persons_page}"
+        page_index=$((page_index + 1))
+    done
+
+    echo "${persons_all}"
+    return 0
+}
